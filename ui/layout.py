@@ -56,10 +56,30 @@ def render_sidebar():
 
 
 def _build_dependency_graph() -> str:
-    lines = ["digraph {", "rankdir=LR;", "node [shape=box, style=rounded, fontsize=10];"]
+    from ui.theme import contrasting_text, get_palette
+
+    p = get_palette()
+    fill = {
+        "done": p["accent"],
+        "locked": p["border"],
+        "not_started": p["bg"],
+    }
+    font = {k: contrasting_text(v) for k, v in fill.items()}
+
+    lines = [
+        "digraph {",
+        "rankdir=LR;",
+        f'bgcolor="{p["bg_secondary"]}";',
+        f'node [shape=box, style="filled,rounded", fontsize=10, '
+        f'color="{p["border"]}", fontname="Inter"];',
+        f'edge [color="{p["text_secondary"]}"];',
+    ]
     for card in CARDS:
-        color = {"done": "#c8f7c5", "locked": "#f2c2c2", "not_started": "#e8e8e8"}[card_status(card)]
-        lines.append(f'"{card.id}" [label="{card.title}", style="filled,rounded", fillcolor="{color}"];')
+        status = card_status(card)
+        lines.append(
+            f'"{card.id}" [label="{card.title}", fillcolor="{fill[status]}", '
+            f'fontcolor="{font[status]}"];'
+        )
         for req in card.requires:
             lines.append(f'"{req}" -> "{card.id}";')
     lines.append("}")

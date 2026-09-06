@@ -12,7 +12,7 @@ from ui.layout import render_card_detail, render_dashboard, render_sidebar
 from ui.registry import CARDS_BY_ID
 from ui.state import init_state
 from ui.summary import render_summary
-from ui.theme import apply_theme
+from ui.theme import apply_theme, inject_theme_css
 
 st.set_page_config(
     page_title="SHADE — Crypto Lab Bench",
@@ -35,3 +35,5 @@ elif view == "summary":
     render_summary()
 else:
     render_dashboard()
+
+inject_theme_css()

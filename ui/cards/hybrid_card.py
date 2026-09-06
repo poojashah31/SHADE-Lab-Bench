@@ -22,23 +22,31 @@ def render_hybrid_encrypt(ss):
             result = hybrid_encrypt_decrypt(plaintext, enc["key"], enc["iv"], enc["ciphertext"], keys["public_key"], keys["private_key"])
             ss["encrypted_aes_key"] = result["encrypted_aes_key"]
             st.metric("RSA-OAEP envelope", f"{len(result['encrypted_aes_key'])} bytes")
+            from ui.theme import get_palette
+            pal = get_palette()
             fig, ax = plt.subplots(figsize=(6.8, 1.5))
+            fig.patch.set_facecolor(pal["bg_secondary"])
+            ax.set_facecolor(pal["bg_secondary"])
             ax.set_xlim(0, 10)
             ax.set_ylim(0, 2)
             ax.axis("off")
             key = FancyBboxPatch((0.55, 0.55), 2.0, 0.85, boxstyle="round,pad=0.08",
-                                 facecolor="#fef3c7", edgecolor="#d97706", linewidth=1.8)
+                                 facecolor=pal["code_bg"], edgecolor=pal["accent"], linewidth=1.8)
             wrapped = FancyBboxPatch((7.25, 0.55), 2.05, 0.85, boxstyle="round,pad=0.08",
-                                     facecolor="#dcfce7", edgecolor="#16a34a", linewidth=1.8)
+                                     facecolor=pal["bg"], edgecolor=pal["accent"], linewidth=1.8)
             ax.add_patch(key)
             ax.add_patch(wrapped)
-            ax.text(1.55, 0.98, "🔑 AES key", ha="center", va="center", fontsize=11, weight="bold")
+            ax.text(1.55, 0.98, "🔑 AES key", ha="center", va="center", fontsize=11, weight="bold",
+                    color=pal["text_primary"])
             ax.add_patch(FancyArrowPatch((2.75, 0.98), (6.95, 0.98), arrowstyle="->", mutation_scale=15,
-                                         linewidth=2, color="#64748b"))
-            ax.add_patch(Rectangle((4.57, 1.1), 0.55, 0.43, facecolor="#64748b", edgecolor="#334155"))
-            ax.add_patch(plt.Circle((4.845, 1.1), 0.28, fill=False, linewidth=2.6, color="#334155"))
-            ax.text(4.845, 0.45, "RSA-OAEP seals", ha="center", va="center", fontsize=9, color="#475569")
-            ax.text(8.275, 0.98, "🔒 Wrapped key", ha="center", va="center", fontsize=10, weight="bold")
+                                         linewidth=2, color=pal["text_secondary"]))
+            ax.add_patch(Rectangle((4.57, 1.1), 0.55, 0.43, facecolor=pal["text_secondary"],
+                                   edgecolor=pal["border"]))
+            ax.add_patch(plt.Circle((4.845, 1.1), 0.28, fill=False, linewidth=2.6, color=pal["border"]))
+            ax.text(4.845, 0.45, "RSA-OAEP seals", ha="center", va="center", fontsize=9,
+                    color=pal["text_secondary"])
+            ax.text(8.275, 0.98, "🔒 Wrapped key", ha="center", va="center", fontsize=10, weight="bold",
+                    color=pal["text_primary"])
             st.pyplot(fig, use_container_width=True)
             plt.close(fig)
             st.caption("Wrapped AES key (hex, truncated)")

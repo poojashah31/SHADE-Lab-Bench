@@ -1,212 +1,240 @@
 """
 SHADE Visual Design System.
 
-Centralised dark / light theme layer using CSS custom properties injected
-via st.markdown.  Cards and layout inherit the palette automatically
-through the CSS cascade — no per-card styling needed.
+Two explicit palettes — LIGHT_THEME and DARK_THEME — are the only place
+hex colours are defined. Injected CSS, Streamlit chrome, matplotlib
+diagrams, and Graphviz nodes all read from get_palette().
 
 Public API
 ----------
 apply_theme()   Call once in app.py after init_state().
-                Renders the sidebar theme toggle and injects the <style>.
-get_palette()   Returns the active palette dict so matplotlib charts
-                (or inline SVG) can coordinate colours with the UI theme.
+get_palette()   Active LIGHT_THEME / DARK_THEME dict.
 """
+
+from __future__ import annotations
 
 import streamlit as st
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Palettes
+#  Palettes — the only hardcoded hex colours in the app
 # ═══════════════════════════════════════════════════════════════════════════
 
-DARK_PALETTE: dict = {
-    # Core
-    "bg":             "#0B1117",
-    "surface":        "#111923",
-    "elevated":       "#17222D",
-    "border":         "#263442",
-    "primary":        "#20B8A6",
-    "primary_hover":  "#1DA394",
-    "text":           "#F3F7F8",
-    "text_secondary": "#9BAAB5",
-    # Semantic
-    "success": "#36C98F",
-    "warning": "#F3B562",
-    "danger":  "#EF6262",
-    "info":    "#55A9FF",
-    # Derived surfaces
-    "code_bg":    "#0D1520",
-    "sidebar_bg": "#0E151D",
-    "input_bg":   "#17222D",
-    # Effects
-    "shadow":       "rgba(0,0,0,0.35)",
-    "shadow_lg":    "rgba(0,0,0,0.50)",
-    "glass_bg":     "rgba(17,25,35,0.60)",
-    "glass_border": "rgba(38,52,66,0.50)",
-    "bg_gradient":  "linear-gradient(170deg,#0B1117 0%,#0D1620 40%,#0F1925 100%)",
-    "primary_glow": "rgba(32,184,166,0.25)",
+LIGHT_THEME: dict = {
+    "bg": "#F4F7FA",
+    "bg_secondary": "#FFFFFF",
+    "text_primary": "#152028",
+    "text_secondary": "#3A4C58",
+    "border": "#C5D2DB",
+    "code_bg": "#E8EEF3",
+    "code_text": "#152028",
+    "accent": "#0A6B65",
 }
 
-LIGHT_PALETTE: dict = {
-    # Core
-    "bg":             "#F5F8FA",
-    "surface":        "#FFFFFF",
-    "elevated":       "#FFFFFF",
-    "border":         "#DCE5EA",
-    "primary":        "#087F78",
-    "primary_hover":  "#066B65",
-    "text":           "#17242D",
-    "text_secondary": "#52636F",
-    # Semantic
-    "success": "#36C98F",
-    "warning": "#F3B562",
-    "danger":  "#EF6262",
-    "info":    "#55A9FF",
-    # Derived surfaces
-    "code_bg":    "#EDF2F6",
-    "sidebar_bg": "#EBF0F4",
-    "input_bg":   "#F0F4F7",
-    # Effects
-    "shadow":       "rgba(0,0,0,0.06)",
-    "shadow_lg":    "rgba(0,0,0,0.12)",
-    "glass_bg":     "rgba(255,255,255,0.70)",
-    "glass_border": "rgba(220,229,234,0.60)",
-    "bg_gradient":  "linear-gradient(170deg,#F5F8FA 0%,#EFF4F8 40%,#F2F6FA 100%)",
-    "primary_glow": "rgba(8,127,120,0.15)",
+DARK_THEME: dict = {
+    "bg": "#0B1117",
+    "bg_secondary": "#151E28",
+    "text_primary": "#F3F7F8",
+    "text_secondary": "#B4C2CC",
+    "border": "#3A4D5C",
+    "code_bg": "#0D1520",
+    "code_text": "#E6EEF2",
+    "accent": "#2EC9B6",
 }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Public API
+#  Colour helpers (derive CSS from the 8 palette keys — no extra hex)
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{max(0, min(255, r)):02x}{max(0, min(255, g)):02x}{max(0, min(255, b)):02x}"
+
+
+def _rgba(hex_color: str, alpha: float) -> str:
+    r, g, b = _hex_to_rgb(hex_color)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _luminance(hex_color: str) -> float:
+    def _lin(c: float) -> float:
+        c = c / 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _hex_to_rgb(hex_color)
+    return 0.2126 * _lin(r) + 0.7152 * _lin(g) + 0.0722 * _lin(b)
+
+
+def _contrast_ratio(a: str, b: str) -> float:
+    l1, l2 = _luminance(a), _luminance(b)
+    lighter, darker = max(l1, l2), min(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _on_color(fill: str, light: str, dark: str) -> str:
+    """Pick whichever of `light` / `dark` contrasts better against `fill`."""
+    return light if _contrast_ratio(fill, light) >= _contrast_ratio(fill, dark) else dark
+
+
+def _adjust(hex_color: str, factor: float) -> str:
+    r, g, b = _hex_to_rgb(hex_color)
+    return _rgb_to_hex(int(r * factor), int(g * factor), int(b * factor))
+
 
 def get_palette() -> dict:
-    """Return the active palette dict for the current theme."""
-    return (
-        DARK_PALETTE
-        if st.session_state.get("shade_dark_mode", True)
-        else LIGHT_PALETTE
-    )
+    """Return the active 8-key palette for the current theme."""
+    return DARK_THEME if st.session_state.get("shade_dark_mode", True) else LIGHT_THEME
+
+
+def contrasting_text(fill: str) -> str:
+    """Pick text_primary or bg, whichever reads better on `fill`."""
+    p = get_palette()
+    return _on_color(fill, p["text_primary"], p["bg"])
 
 
 def apply_theme() -> None:
-    """Inject theme CSS and render the sidebar toggle.  Call once in app.py."""
-    # Initialise on first run only; subsequent runs are managed by the toggle
-    # widget through its key binding.
+    """Inject theme CSS and render the sidebar toggle. Call once in app.py."""
     if "shade_dark_mode" not in st.session_state:
         st.session_state.shade_dark_mode = True
 
-    # ── Sidebar toggle ────────────────────────────────────────────────
     with st.sidebar:
         st.toggle(
-            "🌙 Dark mode",
+            "Dark mode",
             key="shade_dark_mode",
             help="Switch between dark and light appearance",
         )
 
-    # ── Inject CSS ────────────────────────────────────────────────────
-    p = get_palette()
     st.markdown(
         '<link href="https://fonts.googleapis.com/css2?family=Inter:'
         'wght@400;500;600;700;800&display=swap" rel="stylesheet">',
         unsafe_allow_html=True,
     )
-    st.markdown(f"<style>{_build_css(p)}</style>", unsafe_allow_html=True)
+    inject_theme_css()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  CSS generator (private)
-# ═══════════════════════════════════════════════════════════════════════════
+def inject_theme_css() -> None:
+    """Re-inject palette CSS last so it wins over Streamlit's own theme sheet."""
+    st.markdown(f"<style>{_build_css(get_palette())}</style>", unsafe_allow_html=True)
 
-def _build_css(p: dict) -> str:  # noqa: C901 — long but purely declarative
+
+def _build_css(p: dict) -> str:
+    is_light = _luminance(p["bg"]) > 0.5
+    color_scheme = "light" if is_light else "dark"
+    accent_hover = _adjust(p["accent"], 0.88)
+    on_accent = _on_color(p["accent"], p["text_primary"], p["bg"])
+    on_secondary = _on_color(p["bg_secondary"], p["text_primary"], p["bg"])
+    glass_bg = _rgba(p["bg_secondary"], 0.96)
+    glass_border = _rgba(p["border"], 0.95)
+    shadow = _rgba(p["text_primary"], 0.08 if is_light else 0.35)
+    shadow_lg = _rgba(p["text_primary"], 0.14 if is_light else 0.50)
+    accent_glow = _rgba(p["accent"], 0.22)
+    bg_gradient = (
+        f"linear-gradient(170deg, {p['bg']} 0%, {p['bg_secondary']} 100%)"
+    )
+
     return f"""
-/* ═══════════════════════════════════════════════════════════════════ */
-/*  SHADE Design System — auto-generated from ui/theme.py            */
-/* ═══════════════════════════════════════════════════════════════════ */
-
-/* ── CSS Custom Properties ─────────────────────────────────────── */
-
 :root {{
     --shade-bg:              {p["bg"]};
-    --shade-surface:         {p["surface"]};
-    --shade-elevated:        {p["elevated"]};
-    --shade-border:          {p["border"]};
-    --shade-primary:         {p["primary"]};
-    --shade-primary-hover:   {p["primary_hover"]};
-    --shade-text:            {p["text"]};
+    --shade-bg-secondary:    {p["bg_secondary"]};
+    --shade-text-primary:    {p["text_primary"]};
     --shade-text-secondary:  {p["text_secondary"]};
-    --shade-success:         {p["success"]};
-    --shade-warning:         {p["warning"]};
-    --shade-danger:          {p["danger"]};
-    --shade-info:            {p["info"]};
+    --shade-border:          {p["border"]};
     --shade-code-bg:         {p["code_bg"]};
-    --shade-sidebar-bg:      {p["sidebar_bg"]};
-    --shade-input-bg:        {p["input_bg"]};
+    --shade-code-text:       {p["code_text"]};
+    --shade-accent:          {p["accent"]};
+    --shade-accent-hover:    {accent_hover};
+    --shade-on-accent:       {on_accent};
     --shade-radius:          12px;
     --shade-radius-sm:       8px;
     --shade-font:            'Inter', -apple-system, BlinkMacSystemFont,
                              'Segoe UI', Roboto, sans-serif;
+    --background-color: {p["bg"]};
+    --secondary-background-color: {p["bg_secondary"]};
+    --text-color: {p["text_primary"]};
+    --primary-color: {p["accent"]};
 }}
 
-/* ── App Shell ─────────────────────────────────────────────────── */
-
-.stApp {{
-    background: {p["bg_gradient"]} !important;
-    color: var(--shade-text) !important;
+html, body, .stApp {{
+    color-scheme: {color_scheme} !important;
+    background-color: var(--shade-bg) !important;
+    background-image: {bg_gradient} !important;
+    color: var(--shade-text-primary) !important;
     font-family: var(--shade-font) !important;
 }}
 
-[data-testid="stHeader"] {{
-    background: transparent !important;
+[data-testid="stHeader"],
+[data-testid="stBottom"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+.stMainBlockContainer,
+.block-container,
+section.main {{
+    background-color: var(--shade-bg) !important;
+    color: var(--shade-text-primary) !important;
 }}
-
-[data-testid="stBottom"] {{
-    background: transparent !important;
-}}
-
-/* ── Sidebar ───────────────────────────────────────────────────── */
 
 [data-testid="stSidebar"] {{
-    background-color: var(--shade-sidebar-bg) !important;
+    background-color: var(--shade-bg-secondary) !important;
     border-right: 1px solid var(--shade-border) !important;
+    color: var(--shade-text-primary) !important;
 }}
 
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"],
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li {{
-    color: var(--shade-text) !important;
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] li,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] small {{
+    color: var(--shade-text-primary) !important;
+}}
+
+[data-testid="stSidebar"] [data-testid="stButton"] button,
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-testid="stButton"] [data-testid="stMarkdownContainer"] span {{
+    color: var(--shade-on-accent) !important;
+}}
+
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {{
+    color: var(--shade-text-secondary) !important;
 }}
 
 [data-testid="stSidebar"] h2 {{
-    color: var(--shade-primary) !important;
+    color: var(--shade-accent) !important;
     font-family: var(--shade-font) !important;
     font-weight: 700 !important;
 }}
 
 [data-testid="stSidebar"] h3,
 [data-testid="stSidebar"] h4 {{
-    color: var(--shade-text) !important;
+    color: var(--shade-text-primary) !important;
     font-family: var(--shade-font) !important;
 }}
 
-/* ── Typography ────────────────────────────────────────────────── */
-
-.stApp h1 {{
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {{
     font-family: var(--shade-font) !important;
-    font-weight: 800 !important;
-    letter-spacing: -0.03em !important;
-    color: var(--shade-text) !important;
+    color: var(--shade-text-primary) !important;
 }}
 
-.stApp h2, .stApp h3 {{
-    font-family: var(--shade-font) !important;
-    font-weight: 700 !important;
-    color: var(--shade-text) !important;
-}}
+.stApp h1 {{ font-weight: 800 !important; letter-spacing: -0.03em !important; }}
+.stApp h2, .stApp h3 {{ font-weight: 700 !important; }}
+.stApp h4 {{ font-weight: 600 !important; }}
 
-.stApp h4 {{
-    font-family: var(--shade-font) !important;
-    font-weight: 600 !important;
-    color: var(--shade-text) !important;
+.stApp p, .stApp li, .stApp span, .stApp label,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] span {{
+    color: var(--shade-text-primary) !important;
 }}
 
 [data-testid="stCaptionContainer"],
@@ -215,28 +243,24 @@ def _build_css(p: dict) -> str:  # noqa: C901 — long but purely declarative
     color: var(--shade-text-secondary) !important;
 }}
 
-/* ── Surfaces / Cards (glassmorphism) ──────────────────────────── */
-
 [data-testid="stVerticalBlockBorderWrapper"] {{
-    background: {p["glass_bg"]} !important;
+    background: {glass_bg} !important;
     backdrop-filter: blur(12px) !important;
     -webkit-backdrop-filter: blur(12px) !important;
-    border: 1px solid {p["glass_border"]} !important;
+    border: 1px solid {glass_border} !important;
     border-radius: var(--shade-radius) !important;
-    box-shadow: 0 1px 4px {p["shadow"]} !important;
-    transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
+    box-shadow: 0 1px 4px {shadow} !important;
+    color: {on_secondary} !important;
 }}
 
 [data-testid="stVerticalBlockBorderWrapper"]:hover {{
-    border-color: {p["primary"]}40 !important;
-    box-shadow: 0 4px 16px {p["shadow_lg"]} !important;
+    border-color: var(--shade-accent) !important;
+    box-shadow: 0 4px 16px {shadow_lg} !important;
 }}
 
-/* ── Buttons ───────────────────────────────────────────────────── */
-
 .stButton > button {{
-    background-color: var(--shade-primary) !important;
-    color: #FFFFFF !important;
+    background-color: var(--shade-accent) !important;
+    color: var(--shade-on-accent) !important;
     border: none !important;
     border-radius: var(--shade-radius-sm) !important;
     font-family: var(--shade-font) !important;
@@ -244,149 +268,215 @@ def _build_css(p: dict) -> str:  # noqa: C901 — long but purely declarative
     font-size: 0.875rem !important;
     padding: 0.5rem 1rem !important;
     transition: all 0.2s ease !important;
-    letter-spacing: 0.01em !important;
 }}
 
 .stButton > button:hover {{
-    background-color: var(--shade-primary-hover) !important;
-    box-shadow: 0 4px 14px {p["primary_glow"]} !important;
-    transform: translateY(-1px);
-}}
-
-.stButton > button:active {{
-    transform: translateY(0) !important;
+    background-color: var(--shade-accent-hover) !important;
+    box-shadow: 0 4px 14px {accent_glow} !important;
+    color: var(--shade-on-accent) !important;
 }}
 
 .stButton > button:disabled {{
     background-color: var(--shade-border) !important;
     color: var(--shade-text-secondary) !important;
-    opacity: 0.6 !important;
+    opacity: 0.85 !important;
     box-shadow: none !important;
-    cursor: not-allowed !important;
 }}
 
-/* ── Metrics ───────────────────────────────────────────────────── */
-
 [data-testid="stMetricValue"] {{
-    color: var(--shade-primary) !important;
+    color: var(--shade-accent) !important;
     font-family: var(--shade-font) !important;
     font-weight: 700 !important;
 }}
 
-[data-testid="stMetricLabel"] p {{
+[data-testid="stMetricLabel"],
+[data-testid="stMetricLabel"] p,
+[data-testid="stMetricDelta"] {{
     color: var(--shade-text-secondary) !important;
 }}
 
-/* ── Code Blocks ───────────────────────────────────────────────── */
-
-[data-testid="stCode"] {{
+[data-testid="stCode"],
+[data-testid="stCode"] pre,
+[data-testid="stCode"] code,
+code, pre {{
     background-color: var(--shade-code-bg) !important;
-    border: 1px solid var(--shade-border) !important;
+    color: var(--shade-code-text) !important;
+    border-color: var(--shade-border) !important;
     border-radius: var(--shade-radius-sm) !important;
 }}
 
-[data-testid="stCode"] code {{
-    color: var(--shade-text) !important;
+[data-testid="stJson"],
+[data-testid="stJson"] * {{
+    background-color: var(--shade-code-bg) !important;
+    color: var(--shade-code-text) !important;
 }}
-
-/* ── Inputs ────────────────────────────────────────────────────── */
 
 .stTextInput input,
 .stNumberInput input,
-.stTextArea textarea {{
-    background-color: var(--shade-input-bg) !important;
-    color: var(--shade-text) !important;
+.stTextArea textarea,
+[data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea,
+[data-baseweb="select"] > div {{
+    background-color: var(--shade-bg-secondary) !important;
+    color: var(--shade-text-primary) !important;
     border: 1px solid var(--shade-border) !important;
     border-radius: var(--shade-radius-sm) !important;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+    caret-color: var(--shade-text-primary) !important;
 }}
 
 .stTextInput input:focus,
 .stNumberInput input:focus,
 .stTextArea textarea:focus {{
-    border-color: var(--shade-primary) !important;
-    box-shadow: 0 0 0 3px {p["primary_glow"]} !important;
+    border-color: var(--shade-accent) !important;
+    box-shadow: 0 0 0 3px {accent_glow} !important;
 }}
 
-.stSlider [data-testid="stThumbValue"] {{
-    color: var(--shade-text) !important;
+.stSlider [data-testid="stThumbValue"],
+.stSlider label, .stSlider p {{
+    color: var(--shade-text-primary) !important;
 }}
 
-/* ── Alerts ────────────────────────────────────────────────────── */
+.stSlider [data-baseweb="slider"] [role="slider"] {{
+    background-color: var(--shade-accent) !important;
+}}
 
 [data-testid="stAlert"] {{
+    background-color: var(--shade-bg-secondary) !important;
+    color: var(--shade-text-primary) !important;
+    border: 1px solid var(--shade-accent) !important;
     border-radius: var(--shade-radius-sm) !important;
 }}
 
-/* ── Expanders ─────────────────────────────────────────────────── */
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] span,
+[data-testid="stAlert"] div,
+[data-testid="stAlert"] [data-testid="stMarkdownContainer"],
+[data-testid="stAlert"] [data-testid="stMarkdownContainer"] p {{
+    color: var(--shade-text-primary) !important;
+}}
+
+[data-testid="stAlertContainer"],
+[data-testid="stAlertContainer"] > div,
+[data-testid="stNotification"] {{
+    background-color: var(--shade-bg-secondary) !important;
+    color: var(--shade-text-primary) !important;
+    border-color: var(--shade-accent) !important;
+}}
+
+[data-testid="stAlertContainer"] p,
+[data-testid="stAlertContainer"] span,
+[data-testid="stAlertContentError"],
+[data-testid="stAlertContentSuccess"],
+[data-testid="stAlertContentInfo"],
+[data-testid="stAlertContentWarning"] {{
+    color: var(--shade-text-primary) !important;
+    background-color: var(--shade-bg-secondary) !important;
+}}
 
 [data-testid="stExpander"] {{
-    background-color: var(--shade-surface) !important;
+    background-color: var(--shade-bg-secondary) !important;
     border: 1px solid var(--shade-border) !important;
     border-radius: var(--shade-radius) !important;
 }}
 
-[data-testid="stExpander"] [data-testid="stExpanderToggleDetails"] {{
-    color: var(--shade-text) !important;
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] p,
+[data-testid="stExpander"] span {{
+    color: var(--shade-text-primary) !important;
 }}
-
-/* ── Dividers ──────────────────────────────────────────────────── */
 
 hr {{
     border-color: var(--shade-border) !important;
-    opacity: 0.6;
+    opacity: 0.8;
 }}
 
-/* ── Scrollbar ─────────────────────────────────────────────────── */
-
-::-webkit-scrollbar {{
-    width: 7px;
-    height: 7px;
-}}
-
-::-webkit-scrollbar-track {{
-    background: var(--shade-bg);
-}}
-
+::-webkit-scrollbar {{ width: 7px; height: 7px; }}
+::-webkit-scrollbar-track {{ background: var(--shade-bg); }}
 ::-webkit-scrollbar-thumb {{
     background: var(--shade-border);
     border-radius: 4px;
 }}
 
-::-webkit-scrollbar-thumb:hover {{
-    background: var(--shade-text-secondary);
-}}
-
-/* ── Charts ────────────────────────────────────────────────────── */
-
-[data-testid="stVegaLiteChart"] {{
-    background-color: var(--shade-surface);
+[data-testid="stVegaLiteChart"],
+[data-testid="stGraphVizChart"] {{
+    background-color: var(--shade-bg-secondary) !important;
     border-radius: var(--shade-radius-sm);
     padding: 6px;
 }}
-
-[data-testid="stGraphVizChart"] {{
-    background-color: var(--shade-surface);
-    border-radius: var(--shade-radius-sm);
-    padding: 8px;
-}}
-
-/* ── Images ────────────────────────────────────────────────────── */
 
 [data-testid="stImage"] {{
     border-radius: var(--shade-radius-sm);
     overflow: hidden;
 }}
 
-/* ── Toggle widget text ────────────────────────────────────────── */
-
-[data-testid="stToggle"] label span {{
-    color: var(--shade-text) !important;
+/* Toggle switch + its label (sidebar Dark mode / Guided mode).
+   Streamlit 1.63 renders st.toggle as data-testid="stCheckbox". */
+[data-testid="stToggle"] p,
+[data-testid="stToggle"] span,
+[data-testid="stToggle"] label,
+[data-testid="stCheckbox"] p,
+[data-testid="stCheckbox"] span,
+[data-testid="stCheckbox"] label {{
+    color: var(--shade-text-primary) !important;
 }}
 
-/* ── Hide default Streamlit footer ─────────────────────────────── */
+[data-testid="stToggle"] [role="checkbox"],
+[data-testid="stToggle"] [role="switch"],
+[data-testid="stCheckbox"] [role="checkbox"],
+[data-testid="stCheckbox"] [role="switch"],
+[data-baseweb="switch"],
+[data-baseweb="checkbox"] {{
+    background-color: var(--shade-border) !important;
+}}
 
-footer {{
-    visibility: hidden !important;
+[data-testid="stToggle"] [role="checkbox"][aria-checked="true"],
+[data-testid="stToggle"] [role="switch"][aria-checked="true"],
+[data-testid="stCheckbox"] [role="checkbox"][aria-checked="true"],
+[data-testid="stCheckbox"] [role="switch"][aria-checked="true"],
+[data-baseweb="switch"][aria-checked="true"],
+[data-baseweb="checkbox"][aria-checked="true"] {{
+    background-color: var(--shade-accent) !important;
+}}
+
+.stMarkdown, .stCaption, .stText, .stAlert {{
+    color: var(--shade-text-primary) !important;
+}}
+
+.stCodeBlock, .stCode, [data-testid="stCodeBlock"] {{
+    background-color: var(--shade-code-bg) !important;
+    color: var(--shade-code-text) !important;
+}}
+
+.stRadio label, .stRadio p,
+[data-testid="stRadio"] p,
+[data-testid="stRadio"] span {{
+    color: var(--shade-text-primary) !important;
+}}
+
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] span,
+[data-testid="stFileUploaderDropzone"] {{
+    color: var(--shade-text-primary) !important;
+    background-color: var(--shade-bg-secondary) !important;
+    border-color: var(--shade-border) !important;
+}}
+
+footer {{ visibility: hidden !important; }}
+
+/* Button labels are <p>/<span> inside the control — beat the global text rule. */
+div[data-testid="stButton"] button {{
+    background-color: var(--shade-accent) !important;
+    color: var(--shade-on-accent) !important;
+}}
+div[data-testid="stButton"] button p,
+div[data-testid="stButton"] button span,
+div[data-testid="stButton"] [data-testid="stMarkdownContainer"] p {{
+    color: var(--shade-on-accent) !important;
+    background-color: transparent !important;
+}}
+
+.stButton > button:disabled,
+.stButton > button:disabled * {{
+    color: var(--shade-text-secondary) !important;
 }}
 """

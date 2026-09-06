@@ -50,23 +50,29 @@ def render_tamper_detection(ss):
                     check = {"match": False}
 
                 # Static transit illustration: ciphertext is intercepted before receipt.
+                from ui.theme import get_palette
+                pal = get_palette()
                 fig, ax = plt.subplots(figsize=(7.2, 1.55))
+                fig.patch.set_facecolor(pal["bg_secondary"])
+                ax.set_facecolor(pal["bg_secondary"])
                 ax.set_xlim(0, 10)
                 ax.set_ylim(0, 2)
                 ax.axis("off")
                 envelope = FancyBboxPatch((0.45, 0.55), 1.75, 0.9, boxstyle="round,pad=0.08",
-                                          facecolor="#dbeafe", edgecolor="#2563eb", linewidth=1.8)
+                                          facecolor=pal["code_bg"], edgecolor=pal["accent"], linewidth=1.8)
                 receiver = FancyBboxPatch((7.75, 0.45), 1.75, 1.1, boxstyle="round,pad=0.08",
-                                          facecolor="#fee2e2", edgecolor="#dc2626", linewidth=2)
+                                          facecolor=pal["bg"], edgecolor=pal["border"], linewidth=2)
                 ax.add_patch(envelope)
                 ax.add_patch(receiver)
-                ax.text(1.325, 1.0, "✉\nSealed", ha="center", va="center", fontsize=11, weight="bold")
+                ax.text(1.325, 1.0, "✉\nSealed", ha="center", va="center", fontsize=11, weight="bold",
+                        color=pal["text_primary"])
                 ax.add_patch(FancyArrowPatch((2.35, 1), (7.5, 1), arrowstyle="->", mutation_scale=15,
-                                             linewidth=2, color="#64748b"))
-                ax.text(5, 1.3, "☝", ha="center", va="center", fontsize=24)
-                ax.text(5, 0.6, "intercepted", ha="center", va="center", fontsize=9, color="#b45309")
+                                             linewidth=2, color=pal["text_secondary"]))
+                ax.text(5, 1.3, "☝", ha="center", va="center", fontsize=24, color=pal["accent"])
+                ax.text(5, 0.6, "intercepted", ha="center", va="center", fontsize=9,
+                        color=pal["text_secondary"])
                 ax.text(8.625, 1.0, "Receiver\n✕", ha="center", va="center", fontsize=11,
-                        weight="bold", color="#991b1b")
+                        weight="bold", color=pal["text_primary"])
                 st.pyplot(fig, use_container_width=True)
                 plt.close(fig)
 

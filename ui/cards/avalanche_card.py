@@ -66,10 +66,15 @@ def _render_bit_heatmap(total_bits: int, diff_bits: list):
         r, c = divmod(bit, cols)
         grid[r, c] = 1
 
+    from ui.theme import get_palette
+    pal = get_palette()
     fig, ax = plt.subplots(figsize=(8, max(1.5, rows * 0.12)))
+    fig.patch.set_facecolor(pal["bg_secondary"])
+    ax.set_facecolor(pal["bg"])
     ax.imshow(grid, cmap="RdYlGn_r", aspect="auto", vmin=0, vmax=1)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_title("Ciphertext bit differences (red = flipped)", fontsize=9)
+    ax.set_title("Ciphertext bit differences (red = flipped)", fontsize=9,
+                 color=pal["text_primary"])
     fig.tight_layout()
     return fig
